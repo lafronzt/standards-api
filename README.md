@@ -93,6 +93,8 @@ There is a unique constraint on `(rule_key, version)` to prevent duplicate versi
 - `GET /openapi.json`
 - `GET /docs`
 
+`GET /openapi.json` includes detailed schemas for request/response payloads, validation constraints, and error responses.
+
 `GET /api/v1/standards` defaults to active latest standards. Supported filters:
 
 - `status`: `active`, `draft`, `deprecated`
@@ -101,6 +103,12 @@ There is a unique constraint on `(rule_key, version)` to prevent duplicate versi
 - `owner`
 - `limit`
 - `offset`
+
+Validation notes:
+
+- `limit` must be `1.500`
+- `offset` must be `>= 0`
+- invalid filters return `400` with `error.code = "validation_error"`
 
 `GET /api/v1/standards/applicable` accepts:
 
@@ -111,6 +119,13 @@ There is a unique constraint on `(rule_key, version)` to prevent duplicate versi
 - `runtime`
 - `environment`
 - `changed_paths`, comma-separated file paths
+
+Validation notes:
+
+- `changed_paths` must be a comma-separated list with no empty entries (for example, `src/a.ts,infra/main.tf`)
+- malformed `changed_paths` returns `400` with `error.code = "validation_error"`
+
+`GET /api/v1/standards/:ruleKey` returns the latest version for the provided `rule_key`, or `404` if it does not exist.
 
 Matching is deterministic:
 
@@ -142,6 +157,26 @@ Write endpoints are `POST /api/v1/standards` and `PUT /api/v1/standards/:ruleKey
 - If `STANDARDS_API_KEY` is set in any environment, writes require `x-api-key`.
 - In non-production, writes are allowed without a key only when `STANDARDS_API_KEY` is unset.
 - Missing or invalid keys return a JSON `401` response with `error.code = "unauthorized"`.
+
+Write payload notes:
+
+- `rule_key` format for create: `^[A-Z0-9]+(?:-[A-Z0-9]+)+-\d{3,}$` (example: `SRE-K8S-003`)
+- for create, `rule_key`, `title`, `description`, `severity`, `category`, `applies_to`, `rule_text`, `review_guidance`, and `owner` are required
+- `status` defaults to `draft` and `version` defaults to `1` when omitted
+- if `status=deprecated`, `deprecated_at` is required in create payloads
+- `PUT /api/v1/standards/:ruleKey` always returns `201`; it updates drafts in place and creates a new version for active/deprecated rules
+
+Error response shape for non-2xx responses:
+
+```json
+{
+  "error": {
+    "code": "validation_error",
+    "message": "Request validation failed",
+    "details": {}
+  }
+}
+```
 
 ## Example Curl Commands
 
