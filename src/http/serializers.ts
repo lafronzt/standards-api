@@ -14,11 +14,18 @@ export function serializeStandard(standard: Standard) {
     review_guidance: standard.reviewGuidance,
     good_example: standard.goodExample,
     bad_example: standard.badExample,
+    rationale: standard.rationale,
+    tags: standard.tags,
+    source_url: standard.sourceUrl,
+    created_by: standard.createdBy,
+    updated_by: standard.updatedBy,
+    approved_by: standard.approvedBy,
     owner: standard.owner,
     version: standard.version,
     created_at: standard.createdAt.toISOString(),
     updated_at: standard.updatedAt.toISOString(),
-    deprecated_at: standard.deprecatedAt?.toISOString() ?? null
+    deprecated_at: standard.deprecatedAt?.toISOString() ?? null,
+    ...("matchReason" in standard ? { match_reason: standard.matchReason } : {})
   };
 }
 

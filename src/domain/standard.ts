@@ -38,6 +38,12 @@ export type Standard = {
   reviewGuidance: string;
   goodExample?: string | null;
   badExample?: string | null;
+  rationale?: string | null;
+  tags: string[];
+  sourceUrl?: string | null;
+  createdBy?: string | null;
+  updatedBy?: string | null;
+  approvedBy?: string | null;
   owner: string;
   version: number;
   createdAt: Date;
@@ -45,8 +51,15 @@ export type Standard = {
   deprecatedAt?: Date | null;
 };
 
-export type StandardInput = Omit<Standard, "id" | "createdAt" | "updatedAt" | "deprecatedAt"> & {
+export type StandardInput = Omit<Standard, "id" | "createdAt" | "updatedAt" | "deprecatedAt" | "tags"> & {
+  tags?: string[];
   deprecatedAt?: Date | null;
+};
+
+export type StandardPatch = Partial<Omit<StandardInput, "ruleKey">>;
+
+export type ApplicableStandard = Standard & {
+  matchReason: string;
 };
 
 export type ApplicableFilters = {

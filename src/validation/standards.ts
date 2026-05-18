@@ -29,6 +29,12 @@ const standardBodyBaseSchema = z
     review_guidance: z.string().trim().min(3),
     good_example: z.string().trim().optional().nullable(),
     bad_example: z.string().trim().optional().nullable(),
+    rationale: z.string().trim().optional().nullable(),
+    tags: z.array(z.string().trim().min(1)).default([]),
+    source_url: z.string().trim().url().optional().nullable(),
+    created_by: z.string().trim().min(1).optional().nullable(),
+    updated_by: z.string().trim().min(1).optional().nullable(),
+    approved_by: z.string().trim().min(1).optional().nullable(),
     owner: z.string().trim().min(1),
     version: z.number().int().positive().default(1),
     deprecated_at: z.coerce.date().optional().nullable()
@@ -50,18 +56,34 @@ export const updateStandardBodySchema = standardBodyBaseSchema.omit({ rule_key: 
 });
 
 export const listStandardsQuerySchema = z.object({
-  status: z.enum(statuses).optional().default("active")
+  status: z.enum(statuses).optional().default("active"),
+  category: z.enum(categories).optional(),
+  severity: z.enum(severities).optional(),
+  owner: z.string().trim().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).optional()
 });
 
-const csv = z
-  .string()
-  .optional()
-  .transform((value) =>
-    value
-      ?.split(",")
-      .map((item) => item.trim())
-      .filter(Boolean)
-  );
+const csv = z.preprocess(
+  (value) => (Array.isArray(value) ? value.join(",") : value),
+  z
+    .string()
+    .optional()
+    .superRefine((value, ctx) => {
+      if (value === undefined) {
+        return;
+      }
+
+      const parts = value.split(",").map((item) => item.trim());
+      if (parts.some((item) => item.length === 0)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "changed_paths must be a comma-separated list of non-empty file paths"
+        });
+      }
+    })
+    .transform((value) => value?.split(",").map((item) => item.trim()))
+);
 
 export const applicableQuerySchema = z.object({
   repo: z.string().trim().min(1).optional(),

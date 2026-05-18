@@ -45,6 +45,12 @@ model Standard {
   reviewGuidance String           @map("review_guidance")
   goodExample    String?          @map("good_example")
   badExample     String?          @map("bad_example")
+  rationale      String?
+  tags           String[]         @default([])
+  sourceUrl      String?          @map("source_url")
+  createdBy      String?          @map("created_by")
+  updatedBy      String?          @map("updated_by")
+  approvedBy     String?          @map("approved_by")
   owner          String
   version        Int
   createdAt      DateTime         @default(now()) @map("created_at")
@@ -54,5 +60,6 @@ model Standard {
   @@unique([ruleKey, version])
   @@index([ruleKey, status])
   @@index([status, category])
+  @@index([owner])
   @@map("standards")
 }

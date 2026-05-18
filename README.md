@@ -21,6 +21,7 @@ Copy `.env.example` to `.env` and adjust values for your environment.
 | `HOST` | `0.0.0.0` | Bind host |
 | `PORT` | `3000` | API port |
 | `LOG_LEVEL` | `info` | Fastify logger level |
+| `STANDARDS_API_KEY` | unset | Optional write API key. Required for writes when set, and always required when `NODE_ENV=production` |
 
 Do not commit real database credentials or secrets.
 
@@ -69,7 +70,16 @@ The service creates one table:
 
 - `standards`: versioned standards/rules with status, severity, category, applicability metadata, guidance, examples, owner, timestamps, and deprecation timestamp.
 
-There is a unique constraint on `(rule_key, version)` to prevent duplicate versions.
+There is a unique constraint on `(rule_key, version)` to prevent duplicate versions and a partial unique index that allows only one active version for a given `rule_key`.
+
+## Versioning
+
+- `rule_key` is stable across versions.
+- Each database row represents one version of a rule.
+- Draft rules are updated in place by `PUT /api/v1/standards/:ruleKey`.
+- Updating an active or deprecated rule creates a new version.
+- Creating a new active version automatically marks the previous active version for the same `rule_key` as `deprecated` and sets `deprecated_at`.
+- Deprecated rules remain queryable with list filters such as `?status=deprecated`, but they do not appear in `/api/v1/standards/latest` or `/api/v1/standards/applicable`.
 
 ## Endpoints
 
@@ -80,8 +90,17 @@ There is a unique constraint on `(rule_key, version)` to prevent duplicate versi
 - `POST /api/v1/standards`
 - `PUT /api/v1/standards/:ruleKey`
 - `GET /api/v1/standards/applicable`
+- `GET /openapi.json`
+- `GET /docs`
 
-`GET /api/v1/standards` defaults to active latest standards. Pass `?status=draft`, `?status=deprecated`, or `?status=active` to filter.
+`GET /api/v1/standards` defaults to active latest standards. Supported filters:
+
+- `status`: `active`, `draft`, `deprecated`
+- `category`: `reliability`, `security`, `observability`, `performance`, `cost`, `maintainability`, `architecture`, `compliance`
+- `severity`: `critical`, `high`, `medium`, `low`, `info`
+- `owner`
+- `limit`
+- `offset`
 
 `GET /api/v1/standards/applicable` accepts:
 
@@ -93,7 +112,36 @@ There is a unique constraint on `(rule_key, version)` to prevent duplicate versi
 - `environment`
 - `changed_paths`, comma-separated file paths
 
-Matching returns active latest rules when any provided metadata or changed path matches a rule's `applies_to` fields.
+Matching is deterministic:
+
+- Only active rules are returned.
+- Empty or missing `applies_to` fields are global for that field.
+- If an `applies_to` field has values, the request must match one of those values.
+- Supported fields are `languages`, `frameworks`, `runtimes`, `file_patterns`, `teams`, `repos`, and `environments`.
+- `changed_paths` is parsed as comma-separated file paths.
+- `file_patterns` use glob matching against `changed_paths`.
+- A rule with no file patterns can still match on repo, team, language, framework, runtime, or environment.
+- Each returned applicable rule includes `match_reason`.
+
+`/api/v1/standards/latest` and `/api/v1/standards/applicable` return:
+
+```json
+{
+  "standards_version": "2026-05-18T15:30:00.000Z-count-6",
+  "rules": []
+}
+```
+
+The current `standards_version` is generated from the latest `updated_at` timestamp among returned rules and the returned rule count.
+
+## Write API Key
+
+Write endpoints are `POST /api/v1/standards` and `PUT /api/v1/standards/:ruleKey`.
+
+- If `NODE_ENV=production`, writes require `x-api-key`.
+- If `STANDARDS_API_KEY` is set in any environment, writes require `x-api-key`.
+- In non-production, writes are allowed without a key only when `STANDARDS_API_KEY` is unset.
+- Missing or invalid keys return a JSON `401` response with `error.code = "unauthorized"`.
 
 ## Example Curl Commands
 
@@ -144,11 +192,17 @@ Get ReviewOps applicable standards:
 curl 'http://localhost:3000/api/v1/standards/applicable?repo=payments-api&team=platform&language=typescript&environment=production&changed_paths=src/client.ts,infra/main.tf'
 ```
 
+Get Kubernetes standards for a changed manifest:
+
+```bash
+curl 'http://localhost:3000/api/v1/standards/applicable?framework=kubernetes&runtime=container&environment=production&changed_paths=deploy/deployment.yaml'
+```
+
 ## Example ReviewOps Response
 
 ```json
 {
-  "standards_version": "2026-05-18T19:42:00.000Z-3-3",
+  "standards_version": "2026-05-18T19:42:00.000Z-count-1",
   "rules": [
     {
       "id": "c3c3d7a9-2e30-4c12-9f18-0bcb4b5f4b7a",
@@ -170,7 +224,8 @@ curl 'http://localhost:3000/api/v1/standards/applicable?repo=payments-api&team=p
       "version": 1,
       "created_at": "2026-05-18T19:42:00.000Z",
       "updated_at": "2026-05-18T19:42:00.000Z",
-      "deprecated_at": null
+      "deprecated_at": null,
+      "match_reason": "Matched language=typescript and Matched changed_paths=src/client.ts"
     }
   ]
 }
