@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: standards-api
+  namespace: standards-api
+  labels:
+    app: standards-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: standards-api
+  template:
+    metadata:
+      labels:
+        app: standards-api
+    spec:
+      containers:
+        - name: standards-api
+          # Replace with your actual registry/image
+          image: your-registry/standards-api:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: standards-api-secret
+                  key: database-url
+            - name: STANDARDS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: standards-api-secret
+                  key: api-key
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: standards-api-svc
+  namespace: standards-api
+spec:
+  selector:
+    app: standards-api
+  ports:
+    - port: 80
+      targetPort: 3000
+  # ClusterIP keeps this private to the cluster network.
+  # Your self-hosted runner must be on the same network (node, VPN, or cluster-internal).
+  # Change to LoadBalancer if your runner reaches it via an internal LB instead.
+  type: ClusterIP

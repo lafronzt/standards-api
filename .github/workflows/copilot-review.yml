@@ -1,0 +1,147 @@
+name: Copilot Code Review with Standards
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  copilot-review:
+    name: Fetch Standards & Request Copilot Review
+    runs-on: self-hosted  # Must have network access to your K8s cluster
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed file metadata
+        id: meta
+        run: |
+          # Collect changed file extensions to pass as ?language= filter
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "changed_paths<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED" | head -50 | tr '\n' ',' | sed 's/,$//' >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Detect dominant language from extensions
+          LANG=$(echo "$CHANGED" | grep -oE '\.[a-z]+$' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}' | tr -d '.')
+          echo "language=$LANG" >> $GITHUB_OUTPUT
+
+      - name: Fetch applicable standards from API
+        id: standards
+        env:
+          # Resolve to your standards-api service. Options:
+          #   - If runner is a K8s pod:  http://standards-api-svc.standards-api.svc.cluster.local
+          #   - If runner is a node:     http://<node-ip>:<nodePort>
+          #   - If you have an internal LB/DNS: http://standards-api.internal
+          STANDARDS_API_URL: ${{ vars.STANDARDS_API_URL }}
+          REPO: ${{ github.repository }}
+          LANGUAGE: ${{ steps.meta.outputs.language }}
+          CHANGED_PATHS: ${{ steps.meta.outputs.changed_paths }}
+        run: |
+          RESPONSE=$(curl -sf \
+            --max-time 10 \
+            "${STANDARDS_API_URL}/api/v1/standards/applicable?repo=${REPO}&language=${LANGUAGE}&changed_paths=${CHANGED_PATHS}" \
+          ) || {
+            echo "standards_available=false" >> $GITHUB_OUTPUT
+            echo "::warning::Standards API unreachable — skipping standards-aware review"
+            exit 0
+          }
+
+          echo "standards_available=true" >> $GITHUB_OUTPUT
+          echo "payload<<EOF" >> $GITHUB_OUTPUT
+          echo "$RESPONSE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Build review context comment
+        if: steps.standards.outputs.standards_available == 'true'
+        id: comment
+        env:
+          PAYLOAD: ${{ steps.standards.outputs.payload }}
+        run: |
+          # Extract rule summaries from the standards payload for the PR comment
+          RULES=$(echo "$PAYLOAD" | node -e "
+            const chunks = [];
+            process.stdin.on('data', d => chunks.push(d));
+            process.stdin.on('end', () => {
+              const data = JSON.parse(chunks.join(''));
+              const rules = data.rules || data.data || [];
+              if (!rules.length) { process.stdout.write('No applicable rules found.'); return; }
+              const lines = rules.map(r =>
+                '- **[' + r.severity?.toUpperCase() + ']** \`' + r.rule_key + '\` — ' + r.title +
+                (r.guidance ? '\n  > ' + r.guidance.split('\n')[0] : '')
+              );
+              process.stdout.write(lines.join('\n'));
+            });
+          " 2>/dev/null || echo "(could not parse standards payload)")
+
+          {
+            echo 'body<<EOF'
+            echo "## :mag: Standards-Aware Copilot Review"
+            echo ""
+            echo "The following engineering standards apply to this PR. @github-copilot — please review the diff against these rules:"
+            echo ""
+            echo "$RULES"
+            echo ""
+            echo "<details>"
+            echo "<summary>Full standards payload</summary>"
+            echo ""
+            echo '```json'
+            echo "$PAYLOAD" | node -e "const c=[]; process.stdin.on('data',d=>c.push(d)); process.stdin.on('end',()=>console.log(JSON.stringify(JSON.parse(c.join('')),null,2)))" 2>/dev/null || echo "$PAYLOAD"
+            echo '```'
+            echo ""
+            echo "</details>"
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+      - name: Post standards context to PR
+        if: steps.standards.outputs.standards_available == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `${{ steps.comment.outputs.body }}`;
+
+            // Delete a previous standards comment on re-runs to avoid duplicates
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+            for (const c of comments.data) {
+              if (c.body.startsWith('## :mag: Standards-Aware Copilot Review')) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: c.id,
+                });
+              }
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });
+
+      - name: Request Copilot review
+        if: steps.standards.outputs.standards_available == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                reviewers: ['copilot'],  // Requires Copilot code review enabled on the repo
+              });
+            } catch (e) {
+              // Copilot reviewer may already be requested or not enabled — non-fatal
+              core.warning(`Could not request Copilot review: ${e.message}`);
+            }
