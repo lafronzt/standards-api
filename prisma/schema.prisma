@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StandardStatus {
+  active
+  deprecated
+  draft
+}
+
+enum StandardSeverity {
+  critical
+  high
+  medium
+  low
+  info
+}
+
+enum StandardCategory {
+  reliability
+  security
+  observability
+  performance
+  cost
+  maintainability
+  architecture
+  compliance
+}
+
+model Standard {
+  id             String           @id @default(uuid()) @db.Uuid
+  ruleKey        String           @map("rule_key")
+  title          String
+  description    String
+  status         StandardStatus
+  severity       StandardSeverity
+  category       StandardCategory
+  appliesTo      Json             @map("applies_to")
+  ruleText       String           @map("rule_text")
+  reviewGuidance String           @map("review_guidance")
+  goodExample    String?          @map("good_example")
+  badExample     String?          @map("bad_example")
+  owner          String
+  version        Int
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  deprecatedAt   DateTime?        @map("deprecated_at")
+
+  @@unique([ruleKey, version])
+  @@index([ruleKey, status])
+  @@index([status, category])
+  @@map("standards")
+}
