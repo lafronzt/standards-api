@@ -67,6 +67,11 @@ export class MemoryStandardsRepository implements StandardsRepository {
   }
 
   async createReplacingActive(input: StandardInput): Promise<Standard> {
+    const duplicate = this.standards.find((s) => s.ruleKey === input.ruleKey && s.version === input.version);
+    if (duplicate) {
+      throw new ConflictError("A standard with this rule_key and version already exists");
+    }
+
     const now = new Date();
     this.standards = this.standards.map((standard) =>
       standard.ruleKey === input.ruleKey && standard.status === "active"

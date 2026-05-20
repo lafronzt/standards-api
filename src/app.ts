@@ -8,7 +8,11 @@ import type { StandardsRepository } from "./domain/repository.js";
 import { registerRoutes } from "./http/routes.js";
 import { StandardsService } from "./services/standards-service.js";
 
-export async function buildApp(repository: StandardsRepository, logLevel = "info") {
+export async function buildApp(
+  repository: StandardsRepository,
+  logLevel = "info",
+  { rateLimitMax = 100 }: { rateLimitMax?: number } = {}
+) {
   const app = Fastify({
     logger: {
       level: logLevel
@@ -21,7 +25,7 @@ export async function buildApp(repository: StandardsRepository, logLevel = "info
   });
 
   await app.register(fastifyRateLimit, {
-    max: 100,
+    max: rateLimitMax,
     timeWindow: "1 minute",
     errorResponseBuilder: (request: FastifyRequest, context: errorResponseBuilderContext) => ({
       error: {
@@ -38,6 +42,10 @@ export async function buildApp(repository: StandardsRepository, logLevel = "info
 
   await app.register(sensible);
   await registerRoutes(app, new StandardsService(repository));
+
+  app.addHook("onSend", async (request, reply) => {
+    reply.header("x-request-id", request.id);
+  });
 
   app.setNotFoundHandler(async (request, reply) =>
     reply.code(404).send({
