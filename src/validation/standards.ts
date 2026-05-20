@@ -3,6 +3,8 @@ import { categories, severities, statuses } from "../domain/standard.js";
 
 const nonEmptyArray = z.array(z.string().trim().min(1)).default([]);
 
+const appliesToFields = ["languages", "frameworks", "runtimes", "file_patterns", "teams", "repos", "environments"] as const;
+
 export const appliesToSchema = z
   .object({
     languages: nonEmptyArray.optional(),
@@ -14,6 +16,12 @@ export const appliesToSchema = z
     environments: nonEmptyArray.optional()
   })
   .strict()
+  .refine(
+    (obj) => appliesToFields.every((field) => !Object.prototype.hasOwnProperty.call(obj, field) || (obj[field] ?? []).length > 0),
+    {
+      message: "appliesTo fields must be non-empty arrays if provided; omit the field instead of passing an empty array"
+    }
+  )
   .default({});
 
 const standardBodyBaseSchema = z
