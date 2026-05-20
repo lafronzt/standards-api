@@ -277,4 +277,75 @@ describe("standards api", () => {
     expect(docs.statusCode).toBe(200);
     expect(docs.headers["content-type"]).toContain("text/html");
   });
+
+  it("rejects appliesTo fields with empty arrays", async () => {
+    const fastify = await app();
+    const response = await fastify.inject({
+      method: "POST",
+      url: "/api/v1/standards",
+      payload: { ...createdRule, rule_key: "VALID-SCHEMA-001", applies_to: { languages: [] } }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("validation_error");
+  });
+
+  it("normalizes applies_to metadata to lowercase but preserves file_patterns casing", async () => {
+    const fastify = await app([]);
+    const response = await fastify.inject({
+      method: "POST",
+      url: "/api/v1/standards",
+      payload: {
+        ...createdRule,
+        rule_key: "NORM-CASE-001",
+        applies_to: { languages: ["TypeScript", "GO"], file_patterns: ["src/**/*.TS"] }
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const rule = response.json();
+    expect(rule.applies_to.languages).toEqual(["typescript", "go"]);
+    expect(rule.applies_to.file_patterns).toEqual(["src/**/*.TS"]);
+  });
+
+  it("returns 429 with structured error when rate limit is exceeded", async () => {
+    const fastify = await buildApp(new MemoryStandardsRepository([]), "silent", { rateLimitMax: 2 });
+
+    await fastify.inject({ method: "GET", url: "/health" });
+    await fastify.inject({ method: "GET", url: "/health" });
+    const response = await fastify.inject({ method: "GET", url: "/health" });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "rate_limit_exceeded",
+        message: "Too many requests",
+        details: { limit: 2 }
+      }
+    });
+    expect(response.json().error.request_id).toBeDefined();
+    expect(response.headers["x-request-id"]).toBeDefined();
+  });
+
+  it("concurrent creation of the same rule_key at the same version returns 409 for the second request", async () => {
+    const fastify = await app();
+    const payload = {
+      ...createdRule,
+      rule_key: "PERF-API-099",
+      version: 1
+    };
+
+    const results = await Promise.allSettled([
+      fastify.inject({ method: "POST", url: "/api/v1/standards", payload }),
+      fastify.inject({ method: "POST", url: "/api/v1/standards", payload })
+    ]);
+
+    const statuses = results
+      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof fastify.inject>>> => r.status === "fulfilled")
+      .map((r) => r.value.statusCode);
+
+    expect(statuses).toHaveLength(2);
+    expect(statuses.filter((s) => s === 201)).toHaveLength(1);
+    expect(statuses.filter((s) => s === 409)).toHaveLength(1);
+  });
 });

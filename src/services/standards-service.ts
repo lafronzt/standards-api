@@ -148,11 +148,22 @@ function normalizeInput(input: StandardInput): StandardInput {
   };
 }
 
+const LOWERCASE_APPLIES_TO_FIELDS = new Set(["languages", "frameworks", "runtimes", "teams", "repos", "environments"]);
+
 function compactAppliesTo(appliesTo: AppliesTo): AppliesTo {
   return Object.fromEntries(
     Object.entries(appliesTo).map(([key, value]) => [
       key,
-      Array.isArray(value) ? [...new Set(value.map((item) => item.trim()).filter(Boolean))] : value
+      Array.isArray(value)
+        ? [
+            ...new Set(
+              value
+                .map((item) => item.trim())
+                .filter(Boolean)
+                .map((item) => (LOWERCASE_APPLIES_TO_FIELDS.has(key) ? item.toLowerCase() : item))
+            )
+          ]
+        : value
     ])
   );
 }
