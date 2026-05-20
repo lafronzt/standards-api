@@ -8,78 +8,50 @@ export class PrismaStandardsRepository implements StandardsRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async list(filters: ListStandardsFilters = {}): Promise<Standard[]> {
-    try {
-      const rows = await this.prisma.standard.findMany({
-        where: {
-          status: filters.status,
-          category: filters.category,
-          severity: filters.severity,
-          owner: filters.owner
-        },
-        orderBy: [{ ruleKey: "asc" }, { version: "desc" }],
-        take: filters.limit,
-        skip: filters.offset
-      });
+    const rows = await this.prisma.standard.findMany({
+      where: {
+        status: filters.status,
+        category: filters.category,
+        severity: filters.severity,
+        owner: filters.owner
+      },
+      orderBy: [{ ruleKey: "asc" }, { version: "desc" }],
+      take: filters.limit,
+      skip: filters.offset
+    });
 
-      return rows.map(toDomain);
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === "P2025") throw new NotFoundError("Standard not found");
-      }
-      throw error;
-    }
+    return rows.map(toDomain);
   }
 
   async findLatestByRuleKey(ruleKey: string): Promise<Standard | null> {
-    try {
-      const row = await this.prisma.standard.findFirst({
-        where: { ruleKey },
-        orderBy: [{ ruleKey: "asc" }, { version: "desc" }]
-      });
+    const row = await this.prisma.standard.findFirst({
+      where: { ruleKey },
+      orderBy: [{ ruleKey: "asc" }, { version: "desc" }]
+    });
 
-      return row ? toDomain(row) : null;
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === "P2025") throw new NotFoundError("Standard not found");
-      }
-      throw error;
-    }
+    return row ? toDomain(row) : null;
   }
 
   async findActiveByRuleKey(ruleKey: string): Promise<Standard | null> {
-    try {
-      const row = await this.prisma.standard.findFirst({
-        where: { ruleKey, status: "active" },
-        orderBy: [{ ruleKey: "asc" }, { version: "desc" }]
-      });
+    const row = await this.prisma.standard.findFirst({
+      where: { ruleKey, status: "active" },
+      orderBy: [{ ruleKey: "asc" }, { version: "desc" }]
+    });
 
-      return row ? toDomain(row) : null;
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === "P2025") throw new NotFoundError("Standard not found");
-      }
-      throw error;
-    }
+    return row ? toDomain(row) : null;
   }
 
   async findByRuleKeyAndVersion(ruleKey: string, version: number): Promise<Standard | null> {
-    try {
-      const row = await this.prisma.standard.findUnique({
-        where: {
-          ruleKey_version: {
-            ruleKey,
-            version
-          }
+    const row = await this.prisma.standard.findUnique({
+      where: {
+        ruleKey_version: {
+          ruleKey,
+          version
         }
-      });
-
-      return row ? toDomain(row) : null;
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === "P2025") throw new NotFoundError("Standard not found");
       }
-      throw error;
-    }
+    });
+
+    return row ? toDomain(row) : null;
   }
 
   async create(input: StandardInput): Promise<Standard> {
@@ -90,9 +62,8 @@ export class PrismaStandardsRepository implements StandardsRepository {
 
       return toDomain(row);
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === "P2002") throw new ConflictError("A standard with this rule_key and version already exists");
-        if (error.code === "P2025") throw new NotFoundError("Standard not found");
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictError("A standard with this rule_key and version already exists");
       }
       throw error;
     }
@@ -120,9 +91,8 @@ export class PrismaStandardsRepository implements StandardsRepository {
 
       return toDomain(row);
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === "P2002") throw new ConflictError("A standard with this rule_key and version already exists");
-        if (error.code === "P2025") throw new NotFoundError("Standard not found");
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictError("A standard with this rule_key and version already exists");
       }
       throw error;
     }
