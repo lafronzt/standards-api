@@ -277,4 +277,26 @@ describe("standards api", () => {
     expect(docs.statusCode).toBe(200);
     expect(docs.headers["content-type"]).toContain("text/html");
   });
+
+  it("concurrent creation of the same rule_key at the same version returns 409 for the second request", async () => {
+    const fastify = await app();
+    const payload = {
+      ...createdRule,
+      rule_key: "PERF-API-099",
+      version: 1
+    };
+
+    const results = await Promise.allSettled([
+      fastify.inject({ method: "POST", url: "/api/v1/standards", payload }),
+      fastify.inject({ method: "POST", url: "/api/v1/standards", payload })
+    ]);
+
+    const statuses = results
+      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof fastify.inject>>> => r.status === "fulfilled")
+      .map((r) => r.value.statusCode);
+
+    expect(statuses).toHaveLength(2);
+    expect(statuses.filter((s) => s === 201)).toHaveLength(1);
+    expect(statuses.filter((s) => s === 409)).toHaveLength(1);
+  });
 });
