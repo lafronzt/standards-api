@@ -26,7 +26,7 @@ export class PrismaStandardsRepository implements StandardsRepository {
   async findLatestByRuleKey(ruleKey: string): Promise<Standard | null> {
     const row = await this.prisma.standard.findFirst({
       where: { ruleKey },
-      orderBy: [{ ruleKey: "asc" }, { version: "desc" }]
+      orderBy: { version: "desc" }
     });
 
     return row ? toDomain(row) : null;
@@ -35,7 +35,7 @@ export class PrismaStandardsRepository implements StandardsRepository {
   async findActiveByRuleKey(ruleKey: string): Promise<Standard | null> {
     const row = await this.prisma.standard.findFirst({
       where: { ruleKey, status: "active" },
-      orderBy: [{ ruleKey: "asc" }, { version: "desc" }]
+      orderBy: { version: "desc" }
     });
 
     return row ? toDomain(row) : null;
