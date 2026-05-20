@@ -1,4 +1,6 @@
+import fastifyRateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
+import { randomUUID } from "crypto";
 import Fastify from "fastify";
 import { AppError } from "./domain/errors.js";
 import type { StandardsRepository } from "./domain/repository.js";
@@ -9,7 +11,23 @@ export async function buildApp(repository: StandardsRepository, logLevel = "info
   const app = Fastify({
     logger: {
       level: logLevel
-    }
+    },
+    genReqId: (req) => (req.headers["x-request-id"] as string) || randomUUID()
+  });
+
+  await app.register(fastifyRateLimit, {
+    max: 100,
+    timeWindow: "1 minute",
+    errorResponseBuilder: (_request, context) => ({
+      error: {
+        code: "rate_limit_exceeded",
+        message: "Too many requests",
+        details: {
+          limit: context.max,
+          after: context.after
+        }
+      }
+    })
   });
 
   await app.register(sensible);
@@ -24,13 +42,14 @@ export async function buildApp(repository: StandardsRepository, logLevel = "info
     })
   );
 
-  app.setErrorHandler(async (error, _request, reply) => {
+  app.setErrorHandler(async (error, request, reply) => {
     if (error instanceof AppError) {
       return reply.code(error.statusCode).send({
         error: {
           code: error.code,
           message: error.message,
-          details: error.details
+          details: error.details,
+          request_id: request.id
         }
       });
     }
@@ -39,7 +58,8 @@ export async function buildApp(repository: StandardsRepository, logLevel = "info
     return reply.code(500).send({
       error: {
         code: "internal_server_error",
-        message: "Unexpected server error"
+        message: "Unexpected server error",
+        request_id: request.id
       }
     });
   });

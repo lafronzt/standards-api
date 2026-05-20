@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { z } from "zod";
 import { UnauthorizedError } from "../domain/errors.js";
 import type { StandardInput } from "../domain/standard.js";
@@ -50,20 +50,32 @@ export async function registerRoutes(app: FastifyInstance, service: StandardsSer
     return serializeStandard(await service.getLatest(ruleKey));
   });
 
-  app.post("/api/v1/standards", async (request, reply) => {
-    requireWriteApiKey(request.headers["x-api-key"]);
-    const body = parseWithSchema(standardBodySchema, request.body);
-    const rule = await service.create(toInput(body));
-    return reply.code(201).send(serializeStandard(rule));
-  });
+  app.post(
+    "/api/v1/standards",
+    {
+      config: { rateLimit: { max: 20, timeWindow: "1 minute" } }
+    },
+    async (request, reply) => {
+      requireWriteApiKey(request);
+      const body = parseWithSchema(standardBodySchema, request.body);
+      const rule = await service.create(toInput(body));
+      return reply.code(201).send(serializeStandard(rule));
+    }
+  );
 
-  app.put("/api/v1/standards/:ruleKey", async (request, reply) => {
-    requireWriteApiKey(request.headers["x-api-key"]);
-    const { ruleKey } = request.params as { ruleKey: string };
-    const body = parseWithSchema(updateStandardBodySchema, request.body);
-    const rule = await service.updateRule(ruleKey, toPartialInput(body));
-    return reply.code(201).send(serializeStandard(rule));
-  });
+  app.put(
+    "/api/v1/standards/:ruleKey",
+    {
+      config: { rateLimit: { max: 20, timeWindow: "1 minute" } }
+    },
+    async (request, reply) => {
+      requireWriteApiKey(request);
+      const { ruleKey } = request.params as { ruleKey: string };
+      const body = parseWithSchema(updateStandardBodySchema, request.body);
+      const rule = await service.updateRule(ruleKey, toPartialInput(body));
+      return reply.code(201).send(serializeStandard(rule));
+    }
+  );
 
   app.get("/openapi.json", async () => openApiDocument);
 
@@ -79,15 +91,21 @@ export async function registerRoutes(app: FastifyInstance, service: StandardsSer
   );
 }
 
-function requireWriteApiKey(headerValue: string | string[] | undefined): void {
+function requireWriteApiKey(request: FastifyRequest): void {
   const expected = process.env.STANDARDS_API_KEY;
   const mustRequireKey = process.env.NODE_ENV === "production" || Boolean(expected);
   if (!mustRequireKey) {
     return;
   }
 
+  const headerValue = request.headers["x-api-key"];
   const actual = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  const missingKey = !actual;
   if (!expected || actual !== expected) {
+    request.log.warn(
+      { ip: request.ip, path: request.url, reason: missingKey ? "missing_key" : "invalid_key" },
+      "auth failure"
+    );
     throw new UnauthorizedError("Missing or invalid API key");
   }
 }
