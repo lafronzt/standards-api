@@ -19,7 +19,7 @@ export const appliesToSchema = z
   .refine(
     (obj) => appliesToFields.every((field) => !Object.prototype.hasOwnProperty.call(obj, field) || (obj[field] ?? []).length > 0),
     {
-      message: "appliesTo fields must be non-empty arrays if provided; omit the field instead of passing an empty array"
+      message: "applies_to fields must be non-empty arrays if provided; omit the field instead of passing an empty array"
     }
   )
   .default({});

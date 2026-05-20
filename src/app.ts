@@ -8,6 +8,8 @@ import type { StandardsRepository } from "./domain/repository.js";
 import { registerRoutes } from "./http/routes.js";
 import { StandardsService } from "./services/standards-service.js";
 
+type RateLimitError = Error & { statusCode: 429; code: "rate_limit_exceeded"; rateLimitMax: number; rateLimitAfter: string };
+
 export async function buildApp(
   repository: StandardsRepository,
   logLevel = "info",
@@ -27,17 +29,15 @@ export async function buildApp(
   await app.register(fastifyRateLimit, {
     max: rateLimitMax,
     timeWindow: "1 minute",
-    errorResponseBuilder: (request: FastifyRequest, context: errorResponseBuilderContext) => ({
-      error: {
-        code: "rate_limit_exceeded",
-        message: "Too many requests",
-        request_id: request.id,
-        details: {
-          limit: context.max,
-          after: context.after
-        }
-      }
-    })
+    errorResponseBuilder: (_request: FastifyRequest, context: errorResponseBuilderContext) => {
+      const err = Object.assign(new Error("Too many requests"), {
+        statusCode: 429 as const,
+        code: "rate_limit_exceeded" as const,
+        rateLimitMax: context.max,
+        rateLimitAfter: context.after
+      });
+      return err as RateLimitError;
+    }
   });
 
   await app.register(sensible);
@@ -65,6 +65,18 @@ export async function buildApp(
           message: error.message,
           details: error.details,
           request_id: request.id
+        }
+      });
+    }
+
+    const typedError = error as Partial<RateLimitError>;
+    if (typedError.statusCode === 429) {
+      return reply.code(429).send({
+        error: {
+          code: "rate_limit_exceeded",
+          message: "Too many requests",
+          request_id: request.id,
+          details: { limit: typedError.rateLimitMax, after: typedError.rateLimitAfter }
         }
       });
     }
