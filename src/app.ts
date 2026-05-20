@@ -1,6 +1,7 @@
-import fastifyRateLimit from "@fastify/rate-limit";
+import fastifyRateLimit, { type errorResponseBuilderContext } from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
 import { randomUUID } from "crypto";
+import type { FastifyRequest } from "fastify";
 import Fastify from "fastify";
 import { AppError } from "./domain/errors.js";
 import type { StandardsRepository } from "./domain/repository.js";
@@ -18,7 +19,7 @@ export async function buildApp(repository: StandardsRepository, logLevel = "info
   await app.register(fastifyRateLimit, {
     max: 100,
     timeWindow: "1 minute",
-    errorResponseBuilder: (_request, context) => ({
+    errorResponseBuilder: (_request: FastifyRequest, context: errorResponseBuilderContext) => ({
       error: {
         code: "rate_limit_exceeded",
         message: "Too many requests",
