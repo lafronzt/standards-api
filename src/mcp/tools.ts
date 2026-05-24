@@ -1,11 +1,20 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { NotFoundError, ValidationError } from "../domain/errors.js";
+import { AppError } from "../domain/errors.js";
 import type { StandardsService } from "../services/standards-service.js";
 import { serializeReviewOpsPayload, serializeStandard } from "../http/serializers.js";
 import { categories, severities, statuses } from "../domain/standard.js";
 
+const RULE_KEY_REGEX = /^[A-Z0-9]+(?:-[A-Z0-9]+)+-\d{3,}$/;
+
 function toolError(err: unknown): { isError: true; content: [{ type: "text"; text: string }] } {
+  if (err instanceof AppError) {
+    const payload: Record<string, unknown> = { code: err.code, message: err.message };
+    if (err.details !== undefined) {
+      payload.details = err.details;
+    }
+    return { isError: true, content: [{ type: "text", text: JSON.stringify(payload) }] };
+  }
   const message = err instanceof Error ? err.message : String(err);
   return { isError: true, content: [{ type: "text", text: message }] };
 }
@@ -24,8 +33,8 @@ export function registerTools(server: McpServer, service: StandardsService): voi
         category: z.enum(categories).optional(),
         severity: z.enum(severities).optional(),
         owner: z.string().trim().min(1).optional(),
-        limit: z.number().int().min(1).max(500).optional(),
-        offset: z.number().int().min(0).optional()
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+        offset: z.coerce.number().int().min(0).optional()
       }
     },
     async (input) => {
@@ -43,7 +52,7 @@ export function registerTools(server: McpServer, service: StandardsService): voi
     {
       description: "Get the latest version of a single engineering standard by its rule key.",
       inputSchema: {
-        rule_key: z.string().trim().min(1)
+        rule_key: z.string().trim().regex(RULE_KEY_REGEX, "rule_key must match pattern like SRE-K8S-003")
       }
     },
     async ({ rule_key }) => {
@@ -51,9 +60,6 @@ export function registerTools(server: McpServer, service: StandardsService): voi
         const rule = await service.getLatest(rule_key);
         return toolResult(serializeStandard(rule));
       } catch (err) {
-        if (err instanceof NotFoundError) {
-          return toolError(err);
-        }
         return toolError(err);
       }
     }
@@ -101,9 +107,6 @@ export function registerTools(server: McpServer, service: StandardsService): voi
         });
         return toolResult(serializeReviewOpsPayload(payload));
       } catch (err) {
-        if (err instanceof ValidationError) {
-          return toolError(err);
-        }
         return toolError(err);
       }
     }
