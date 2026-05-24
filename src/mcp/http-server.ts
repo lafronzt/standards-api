@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -10,8 +11,8 @@ import { StandardsService } from "../services/standards-service.js";
 import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
 
-type Session = { server: McpServer; transport: StreamableHTTPServerTransport };
-const sessions = new Map<string, Session>();
+export type Session = { server: McpServer; transport: StreamableHTTPServerTransport };
+export type SessionMap = Map<string, Session>;
 
 /**
  * Returns true if the request carries a valid API key.
@@ -36,7 +37,8 @@ function rejectBadRequest(res: ServerResponse, message: string): void {
   res.end(
     JSON.stringify({
       jsonrpc: "2.0",
-      error: { code: -32000, message },
+      // -32600 = Invalid Request per JSON-RPC 2.0 spec
+      error: { code: -32600, message },
       id: null
     })
   );
@@ -92,116 +94,117 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
-function createMcpServer(service: StandardsService): McpServer {
+function buildMcpServer(service: StandardsService): McpServer {
   const server = new McpServer({ name: "standards-api", version: "1.0.0" });
   registerTools(server, service);
   registerResources(server, service);
   return server;
 }
 
-async function handlePost(
-  req: IncomingMessage,
-  res: ServerResponse,
-  service: StandardsService
-): Promise<void> {
-  let body: unknown;
-  try {
-    body = await readBody(req);
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) {
-      res.writeHead(413, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Request body too large" }));
-    } else {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Request body is not valid JSON" }));
+/**
+ * Creates a request handler for the MCP Streamable HTTP transport along with
+ * the session map it manages. Exported so tests can inject a memory-backed
+ * service and inspect sessions directly.
+ */
+export function createMcpHttpHandler(service: StandardsService): {
+  handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+  sessions: SessionMap;
+} {
+  const sessions: SessionMap = new Map();
+
+  async function handlePost(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let body: unknown;
+    try {
+      body = await readBody(req);
+    } catch (err) {
+      if (err instanceof BodyTooLargeError) {
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Request body too large" }));
+      } else if (err instanceof BadJsonError) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Request body is not valid JSON" }));
+      } else {
+        console.error("Error reading request body:", err);
+        serverError(res);
+      }
+      return;
     }
-    return;
+
+    try {
+      const sessionId = req.headers["mcp-session-id"];
+      const existingId = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+
+      if (existingId && sessions.has(existingId)) {
+        const { transport } = sessions.get(existingId)!;
+        await transport.handleRequest(req, res, body);
+        return;
+      }
+
+      if (!existingId && isInitializeRequest(body)) {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (id) => {
+            sessions.set(id, { server: mcpServer, transport });
+          }
+        });
+
+        const mcpServer = buildMcpServer(service);
+
+        transport.onclose = () => {
+          const id = transport.sessionId;
+          if (id) sessions.delete(id);
+          mcpServer.close().catch((err) => console.error("Error closing McpServer:", err));
+        };
+
+        await mcpServer.connect(transport);
+        await transport.handleRequest(req, res, body);
+        return;
+      }
+
+      rejectBadRequest(res, "No valid session ID provided");
+    } catch (err) {
+      console.error("Error handling POST /mcp:", err);
+      serverError(res);
+    }
   }
 
-  try {
+  async function handleGet(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const sessionId = req.headers["mcp-session-id"];
-    const existingId = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+    const id = Array.isArray(sessionId) ? sessionId[0] : sessionId;
 
-    if (existingId && sessions.has(existingId)) {
-      const { transport } = sessions.get(existingId)!;
-      await transport.handleRequest(req, res, body);
+    if (!id || !sessions.has(id)) {
+      rejectBadRequest(res, "Invalid or missing session ID");
       return;
     }
 
-    if (!existingId && isInitializeRequest(body)) {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (id) => {
-          sessions.set(id, { server: mcpServer, transport });
-        }
-      });
+    try {
+      const { transport } = sessions.get(id)!;
+      await transport.handleRequest(req, res);
+    } catch (err) {
+      console.error("Error handling GET /mcp:", err);
+      serverError(res);
+    }
+  }
 
-      const mcpServer = createMcpServer(service);
+  async function handleDelete(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const sessionId = req.headers["mcp-session-id"];
+    const id = Array.isArray(sessionId) ? sessionId[0] : sessionId;
 
-      transport.onclose = () => {
-        const id = transport.sessionId;
-        if (id) sessions.delete(id);
-        mcpServer.close().catch((err) => console.error("Error closing McpServer:", err));
-      };
-
-      await mcpServer.connect(transport);
-      await transport.handleRequest(req, res, body);
+    if (!id || !sessions.has(id)) {
+      rejectBadRequest(res, "Invalid or missing session ID");
       return;
     }
 
-    rejectBadRequest(res, "No valid session ID provided");
-  } catch (err) {
-    console.error("Error handling POST /mcp:", err);
-    serverError(res);
-  }
-}
-
-async function handleGet(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const sessionId = req.headers["mcp-session-id"];
-  const id = Array.isArray(sessionId) ? sessionId[0] : sessionId;
-
-  if (!id || !sessions.has(id)) {
-    rejectBadRequest(res, "Invalid or missing session ID");
-    return;
+    try {
+      const { transport } = sessions.get(id)!;
+      await transport.handleRequest(req, res);
+    } catch (err) {
+      console.error("Error handling DELETE /mcp:", err);
+      serverError(res);
+    }
   }
 
-  try {
-    const { transport } = sessions.get(id)!;
-    await transport.handleRequest(req, res);
-  } catch (err) {
-    console.error("Error handling GET /mcp:", err);
-    serverError(res);
-  }
-}
-
-async function handleDelete(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const sessionId = req.headers["mcp-session-id"];
-  const id = Array.isArray(sessionId) ? sessionId[0] : sessionId;
-
-  if (!id || !sessions.has(id)) {
-    rejectBadRequest(res, "Invalid or missing session ID");
-    return;
-  }
-
-  try {
-    const { transport } = sessions.get(id)!;
-    await transport.handleRequest(req, res);
-  } catch (err) {
-    console.error("Error handling DELETE /mcp:", err);
-    serverError(res);
-  }
-}
-
-const isMain = process.argv[1] === fileURLToPath(import.meta.url);
-
-if (isMain) {
-  const MCP_HTTP_PORT = parseInt(process.env.MCP_HTTP_PORT ?? "3001", 10);
-
-  const prisma = new PrismaClient();
-  const repository = new PrismaStandardsRepository(prisma);
-  const service = new StandardsService(repository);
-
-  const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = req.url ?? "";
     const method = req.method ?? "";
 
@@ -211,13 +214,8 @@ if (isMain) {
       return;
     }
 
-    if (!isAuthorized(req.headers["x-api-key"], process.env.MCP_API_KEY)) {
-      rejectUnauthorized(res);
-      return;
-    }
-
     if (method === "POST") {
-      await handlePost(req, res, service);
+      await handlePost(req, res);
     } else if (method === "GET") {
       await handleGet(req, res);
     } else if (method === "DELETE") {
@@ -226,6 +224,30 @@ if (isMain) {
       res.writeHead(405, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Method not allowed" }));
     }
+  }
+
+  return { handler, sessions };
+}
+
+// Normalize argv[1] to an absolute path so the comparison works whether npm
+// passes a relative path (e.g. "src/mcp/http-server.ts") or an absolute one.
+const isMain = resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url);
+
+if (isMain) {
+  const MCP_HTTP_PORT = parseInt(process.env.MCP_HTTP_PORT ?? "3001", 10);
+
+  const prisma = new PrismaClient();
+  const repository = new PrismaStandardsRepository(prisma);
+  const service = new StandardsService(repository);
+
+  const { handler } = createMcpHttpHandler(service);
+
+  const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    if (!isAuthorized(req.headers["x-api-key"], process.env.MCP_API_KEY)) {
+      rejectUnauthorized(res);
+      return;
+    }
+    await handler(req, res);
   });
 
   async function shutdown(): Promise<void> {
