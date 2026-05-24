@@ -223,7 +223,13 @@ export function createMcpHttpHandler(service: StandardsService): {
   }
 
   async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const pathname = new URL(req.url ?? "", "http://localhost").pathname;
+    let pathname: string;
+    try {
+      pathname = new URL(req.url ?? "", "http://localhost").pathname;
+    } catch {
+      rejectBadRequest(res, "Malformed request URL");
+      return;
+    }
     const method = req.method ?? "";
 
     if (pathname !== "/mcp") {
