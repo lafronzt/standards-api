@@ -61,6 +61,8 @@ npm run lint             # strict TypeScript check
 npm test                 # run tests
 npm run mcp:dev          # start MCP stdio server (tsx, no build required)
 npm run mcp:start        # start compiled MCP stdio server
+npm run mcp:http:dev     # start MCP Streamable HTTP server (tsx, no build required)
+npm run mcp:http:start   # start compiled MCP Streamable HTTP server
 npm run prisma:migrate   # create/apply local migration
 npm run prisma:deploy    # apply migrations in deployed environments
 npm run prisma:seed      # load example standards
@@ -115,6 +117,59 @@ Add the following to your MCP client configuration (for example, `claude_desktop
 | --- | --- |
 | `standards://latest` | Latest active standards payload as JSON |
 | `standards://rule/{rule_key}` | A single standard by rule key |
+
+## MCP Streamable HTTP Server
+
+The Streamable HTTP server exposes the same tools and resources as the stdio server over the [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http). Remote MCP clients (such as Claude.ai) can connect to it over HTTPS via a reverse proxy.
+
+### Environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MCP_API_KEY` | required | API key sent in `x-api-key` on every request. Unset = all requests rejected. |
+| `MCP_HTTP_PORT` | `3001` | Port for the Streamable HTTP MCP server (avoids collision with Fastify on `3000`). |
+
+### Running locally
+
+```bash
+# Development (no build step required)
+DATABASE_URL=postgresql://user:password@localhost:5432/standards \
+  MCP_API_KEY=secret \
+  npm run mcp:http:dev
+
+# Production (build first)
+npm run build
+DATABASE_URL=postgresql://user:password@localhost:5432/standards \
+  MCP_API_KEY=secret \
+  npm run mcp:http:start
+```
+
+Requests without a valid `x-api-key` header return `401`. Deploy behind a TLS-terminating reverse proxy (nginx, Caddy, AWS ALB, etc.) before exposing to the public internet.
+
+### Client configuration
+
+Add the following to your MCP client configuration to connect to a remotely hosted instance:
+
+```json
+{
+  "mcpServers": {
+    "standards-api-remote": {
+      "type": "http",
+      "url": "https://your-host/mcp",
+      "headers": {
+        "x-api-key": "your-secret-key"
+      }
+    }
+  }
+}
+```
+
+Replace `https://your-host/mcp` with the public URL of your reverse proxy.
+
+### Tools and resources
+
+The Streamable HTTP server exposes the same four tools and two resources as the stdio server. See the [MCP Server](#mcp-server) section above for the full list.
+
 
 ## Database
 
