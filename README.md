@@ -170,6 +170,7 @@ Replace `https://your-host/mcp` with the public URL of your reverse proxy.
 
 The Streamable HTTP server exposes the same four tools and two resources as the stdio server. See the [MCP Server](#mcp-server) section above for the full list.
 
+
 ## Database
 
 The service creates one table:

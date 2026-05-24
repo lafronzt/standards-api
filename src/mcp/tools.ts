@@ -24,7 +24,7 @@ function toolError(err: unknown): ToolError {
     return { isError: true, content: [{ type: "text", text: JSON.stringify(payload) }] };
   }
   console.error("Unexpected MCP tool error:", err);
-  return { isError: true, content: [{ type: "text", text: JSON.stringify({ code: "internal_error", message: "An unexpected error occurred" }) }] };
+  return { isError: true, content: [{ type: "text", text: JSON.stringify({ code: "internal_error", message: "An unexpected error occurred", statusCode: 500 }) }] };
 }
 
 function toolResult(data: unknown): ToolResult {
