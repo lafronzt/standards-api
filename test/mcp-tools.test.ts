@@ -16,11 +16,11 @@ function parseResult(result: { content: [{ text: string }] }) {
 
 describe("MCP tool handlers", () => {
   describe("listStandards", () => {
-    it("returns all active standards by default", async () => {
+    it("defaults to active status when called with no arguments", async () => {
       const { listStandards } = makeHandlers();
-      const parsed = parseResult(await listStandards({ status: "active" }));
+      const parsed = parseResult(await listStandards({}));
       expect(parsed.data).toHaveLength(seedStandards.length);
-      expect(parsed.data[0]).toHaveProperty("rule_key");
+      expect(parsed.data.every((r: { status: string }) => r.status === "active")).toBe(true);
     });
 
     it("filters by category", async () => {

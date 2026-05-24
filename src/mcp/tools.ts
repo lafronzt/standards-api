@@ -23,8 +23,8 @@ function toolError(err: unknown): ToolError {
     }
     return { isError: true, content: [{ type: "text", text: JSON.stringify(payload) }] };
   }
-  const message = err instanceof Error ? err.message : String(err);
-  return { isError: true, content: [{ type: "text", text: message }] };
+  console.error("Unexpected MCP tool error:", err);
+  return { isError: true, content: [{ type: "text", text: JSON.stringify({ code: "internal_error", message: "An unexpected error occurred" }) }] };
 }
 
 function toolResult(data: unknown): ToolResult {
@@ -54,9 +54,9 @@ export type ApplicableStandardsInput = {
 
 export function createHandlers(service: StandardsService) {
   return {
-    async listStandards(input: ListStandardsInput): Promise<ToolResult | ToolError> {
+    async listStandards({ status = "active", ...rest }: ListStandardsInput = {}): Promise<ToolResult | ToolError> {
       try {
-        const rules = await service.list(input);
+        const rules = await service.list({ status, ...rest });
         return toolResult({ data: rules.map(serializeStandard) });
       } catch (err) {
         return toolError(err);
@@ -89,7 +89,7 @@ export function createHandlers(service: StandardsService) {
       runtime,
       environment,
       changed_paths
-    }: ApplicableStandardsInput): Promise<ToolResult | ToolError> {
+    }: ApplicableStandardsInput = {}): Promise<ToolResult | ToolError> {
       try {
         const payload = await service.applicable({
           repo,
