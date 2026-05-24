@@ -130,6 +130,11 @@ export function createMcpHttpHandler(service: StandardsService): {
       return;
     }
 
+    if (body === undefined) {
+      rejectBadRequest(res, "POST body must not be empty");
+      return;
+    }
+
     try {
       const sessionId = req.headers["mcp-session-id"];
       const existingId = Array.isArray(sessionId) ? sessionId[0] : sessionId;
@@ -240,7 +245,7 @@ if (isMain) {
   const repository = new PrismaStandardsRepository(prisma);
   const service = new StandardsService(repository);
 
-  const { handler } = createMcpHttpHandler(service);
+  const { handler, sessions } = createMcpHttpHandler(service);
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (!isAuthorized(req.headers["x-api-key"], process.env.MCP_API_KEY)) {
@@ -251,6 +256,15 @@ if (isMain) {
   });
 
   async function shutdown(): Promise<void> {
+    // Close every active McpServer so SSE streams are terminated and clients
+    // receive a clean disconnect rather than a socket hang.
+    await Promise.allSettled(
+      [...sessions.values()].map(({ server }) => server.close())
+    );
+    sessions.clear();
+    // Force-close any remaining open connections (e.g. lingering SSE streams)
+    // so httpServer.close() resolves promptly instead of hanging until idle.
+    httpServer.closeAllConnections();
     await new Promise<void>((resolve, reject) => {
       httpServer.close((err) => (err ? reject(err) : resolve()));
     });
