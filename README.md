@@ -55,14 +55,66 @@ docker compose exec app npm run prisma:seed:prod
 ## Scripts
 
 ```bash
-npm run dev              # start local dev server
+npm run dev              # start local HTTP dev server
 npm run build            # compile TypeScript
 npm run lint             # strict TypeScript check
 npm test                 # run tests
+npm run mcp:dev          # start MCP stdio server (tsx, no build required)
+npm run mcp:start        # start compiled MCP stdio server
 npm run prisma:migrate   # create/apply local migration
 npm run prisma:deploy    # apply migrations in deployed environments
 npm run prisma:seed      # load example standards
 ```
+
+## MCP Server
+
+The MCP server exposes read-only access to engineering standards over the [Model Context Protocol](https://modelcontextprotocol.io) stdio transport. It shares the same PostgreSQL database as the HTTP API.
+
+### Running locally
+
+```bash
+# Development (no build step required)
+DATABASE_URL=postgresql://user:password@localhost:5432/standards npm run mcp:dev
+
+# Production (build first)
+npm run build
+DATABASE_URL=postgresql://user:password@localhost:5432/standards npm run mcp:start
+```
+
+### Client configuration
+
+Add the following to your MCP client configuration (for example, `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "standards-api": {
+      "command": "npm",
+      "args": ["run", "mcp:start"],
+      "cwd": "/absolute/path/to/standards-api",
+      "env": {
+        "DATABASE_URL": "postgresql://user:password@localhost:5432/standards"
+      }
+    }
+  }
+}
+```
+
+### Tools
+
+| Tool | Description |
+| --- | --- |
+| `list_standards` | List standards with optional `status`, `category`, `severity`, `owner`, `limit`, `offset` filters |
+| `get_standard` | Get the latest version of a single standard by `rule_key` |
+| `latest_standards` | Return the latest active standards payload (same as `GET /api/v1/standards/latest`) |
+| `applicable_standards` | Return active standards matching `repo`, `team`, `language`, `framework`, `runtime`, `environment`, and/or `changed_paths` |
+
+### Resources
+
+| URI | Description |
+| --- | --- |
+| `standards://latest` | Latest active standards payload as JSON |
+| `standards://rule/{rule_key}` | A single standard by rule key |
 
 ## Database
 
