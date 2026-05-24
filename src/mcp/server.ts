@@ -28,8 +28,17 @@ async function shutdown(): Promise<void> {
   await prisma.$disconnect();
 }
 
-process.on("SIGINT", () => void shutdown().then(() => process.exit(0)));
-process.on("SIGTERM", () => void shutdown().then(() => process.exit(0)));
+function handleSignal(signal: string): void {
+  shutdown()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error(`Shutdown error on ${signal}:`, err);
+      process.exit(1);
+    });
+}
+
+process.on("SIGINT", () => handleSignal("SIGINT"));
+process.on("SIGTERM", () => handleSignal("SIGTERM"));
 
 main().catch((err) => {
   console.error("MCP server error:", err);
