@@ -119,10 +119,23 @@ export function createMcpHttpHandler(service: StandardsService): {
     } catch (err) {
       if (err instanceof BodyTooLargeError) {
         res.writeHead(413, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Request body too large" }));
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            error: { code: -32600, message: "Request body too large" },
+            id: null
+          })
+        );
       } else if (err instanceof BadJsonError) {
         res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Request body is not valid JSON" }));
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            // -32700 = Parse error per JSON-RPC 2.0 spec
+            error: { code: -32700, message: "Parse error: request body is not valid JSON" },
+            id: null
+          })
+        );
       } else {
         console.error("Error reading request body:", err);
         serverError(res);
@@ -210,10 +223,10 @@ export function createMcpHttpHandler(service: StandardsService): {
   }
 
   async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = req.url ?? "";
+    const pathname = new URL(req.url ?? "", "http://localhost").pathname;
     const method = req.method ?? "";
 
-    if (url !== "/mcp") {
+    if (pathname !== "/mcp") {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Not found" }));
       return;
