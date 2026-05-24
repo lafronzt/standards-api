@@ -52,20 +52,40 @@ function serverError(res: ServerResponse): void {
         id: null
       })
     );
+  } else {
+    // Headers already sent (e.g. mid-SSE stream) — terminate the response so
+    // the connection doesn't hang.
+    res.end();
   }
 }
+
+const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MiB
+
+class BodyTooLargeError extends Error {}
+class BadJsonError extends Error {}
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let raw = "";
+    let bytesRead = 0;
     req.on("data", (chunk: Buffer) => {
+      bytesRead += chunk.byteLength;
+      if (bytesRead > MAX_BODY_BYTES) {
+        reject(new BodyTooLargeError("Request body exceeds maximum allowed size"));
+        req.destroy();
+        return;
+      }
       raw += chunk.toString();
     });
     req.on("end", () => {
+      if (raw.length === 0) {
+        resolve(undefined);
+        return;
+      }
       try {
-        resolve(raw.length > 0 ? (JSON.parse(raw) as unknown) : undefined);
-      } catch (e) {
-        reject(e);
+        resolve(JSON.parse(raw) as unknown);
+      } catch {
+        reject(new BadJsonError("Request body is not valid JSON"));
       }
     });
     req.on("error", reject);
@@ -84,8 +104,21 @@ async function handlePost(
   res: ServerResponse,
   service: StandardsService
 ): Promise<void> {
+  let body: unknown;
   try {
-    const body = await readBody(req);
+    body = await readBody(req);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      res.writeHead(413, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Request body too large" }));
+    } else {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Request body is not valid JSON" }));
+    }
+    return;
+  }
+
+  try {
     const sessionId = req.headers["mcp-session-id"];
     const existingId = Array.isArray(sessionId) ? sessionId[0] : sessionId;
 
@@ -108,6 +141,7 @@ async function handlePost(
       transport.onclose = () => {
         const id = transport.sessionId;
         if (id) sessions.delete(id);
+        mcpServer.close().catch((err) => console.error("Error closing McpServer:", err));
       };
 
       await mcpServer.connect(transport);
